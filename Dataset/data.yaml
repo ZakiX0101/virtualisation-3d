@@ -1,0 +1,11 @@
+path: ./Dataset
+
+train: images/train
+val: images/val
+
+nc: 4
+names:
+  0: oud
+  1: bendir
+  2: guembri
+  3: outar
