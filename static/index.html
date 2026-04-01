@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Smart Heritage 3D Viewer</title>
+  <link rel="stylesheet" href="/style.css" />
+
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.161.0/build/three.module.js",
+      "three/addons/": "https://unpkg.com/three@0.161.0/examples/jsm/"
+    }
+  }
+  </script>
+</head>
+<body>
+  <div class="layout">
+    <div class="viewer-panel">
+      <div class="topbar">
+        <h1>OUD 3D Viewer</h1>
+        <p>Détection + modèle 3D + adaptation de texture</p>
+      </div>
+
+      <div class="toolbar">
+        <button id="btnReset">Vue normale</button>
+        <button id="btnExplode">Vue éclatée</button>
+        <button id="btnTable">Table</button>
+        <button id="btnChevilles">Chevilles</button>
+        <button id="btnStrings">Strings</button>
+        <button id="btnAll">Tout afficher</button>
+      </div>
+
+      <div id="viewer"></div>
+    </div>
+
+    <aside class="info-panel">
+      <div class="card">
+        <h2>État actuel</h2>
+        <p><strong>Instrument :</strong> <span id="instrument">Aucun</span></p>
+        <p><strong>Teinte :</strong> <span id="woodTone">-</span></p>
+        <p><strong>Texture :</strong> <span id="textureName">-</span></p>
+      </div>
+
+      <div class="card">
+        <h2>Historique</h2>
+        <p id="historyText">En attente de détection...</p>
+      </div>
+
+      <div class="card">
+        <h2>Composants</h2>
+        <div id="partsList"></div>
+      </div>
+    </aside>
+  </div>
+
+  <script type="module" src="/main.js"></script>
+</body>
+</html>
