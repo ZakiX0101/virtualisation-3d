@@ -19,9 +19,13 @@ from app.web.state import update_state
 
 MODEL_BY_INSTRUMENT = {
     "oud": "/assets/models/oud.glb",
+    "guembri": "/assets/models/guembri.glb",
     # add others later:
     # "loutar": "/assets/models/loutar.glb",
 }
+
+
+TEXTURED_3D_INSTRUMENTS = {"oud", "guembri"}
 
 
 def start_web_server():
@@ -92,12 +96,15 @@ def main():
             dominant_color = None
             tint_rgb = [181, 141, 107]
 
-            if label == "oud":
+            # texture bois pour les instruments 3D à texture
+            if label in TEXTURED_3D_INSTRUMENTS:
                 crop = crop_from_box(raw_frame, x1, y1, x2, y2)
                 texture_profile = choose_best_texture_from_crop(crop)
-                wood_tone = texture_profile["tone"]
-                dominant_color = texture_profile["dominant_bgr"]
-                tint_rgb = bgr_to_rgb_list(dominant_color)
+
+                if texture_profile is not None:
+                    wood_tone = texture_profile["tone"]
+                    dominant_color = texture_profile["dominant_bgr"]
+                    tint_rgb = bgr_to_rgb_list(dominant_color)
 
             frame = draw_detection_overlay(
                 frame=frame,
@@ -127,12 +134,12 @@ def main():
 
             model_url = MODEL_BY_INSTRUMENT.get(label)
 
-            # Changer l'objet 3D seulement si cet instrument a un modèle 3D
+            # changer l'objet 3D seulement si cet instrument a un modèle 3D
             if model_url:
                 last_3d_instrument = label
                 last_3d_model_url = model_url
 
-                if label == "oud" and primary_detection["texture_profile"] is not None:
+                if primary_detection["texture_profile"] is not None:
                     profile = primary_detection["texture_profile"]
                     last_3d_texture_name = profile["name"]
                     last_3d_texture_url = texture_url_from_profile(profile)
@@ -144,11 +151,9 @@ def main():
                     last_3d_wood_tone = None
                     last_3d_tint_rgb = [181, 141, 107]
 
-            # Garder le dernier modèle 3D affiché même si la détection courante
-            # n'a pas encore de modèle 3D
             update_state(
                 visible=last_3d_model_url is not None,
-                instrument=label,  # texte UI = instrument détecté actuellement
+                instrument=label,
                 history=last_history,
                 wood_tone=last_3d_wood_tone,
                 texture_name=last_3d_texture_name,
@@ -158,7 +163,6 @@ def main():
             )
 
         else:
-            # Aucune détection : garder le dernier modèle 3D visible
             update_state(
                 visible=last_3d_model_url is not None,
                 instrument=last_3d_instrument,
