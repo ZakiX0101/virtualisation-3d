@@ -60,6 +60,7 @@ const gltfLoader = new GLTFLoader();
 
 function updateParts(parts = []) {
   partsListEl.innerHTML = "";
+
   for (const part of parts) {
     const wrapper = document.createElement("div");
     wrapper.className = "part";
@@ -80,17 +81,25 @@ function updateParts(parts = []) {
 
 function removeCurrentModel() {
   if (!oudModel) return;
+
   scene.remove(oudModel);
+
   oudModel.traverse((obj) => {
     if (obj.isMesh) {
       obj.geometry?.dispose?.();
+
       if (Array.isArray(obj.material)) {
-        obj.material.forEach((m) => m.dispose?.());
-      } else {
-        obj.material?.dispose?.();
+        obj.material.forEach((m) => {
+          if (m.map) m.map.dispose?.();
+          m.dispose?.();
+        });
+      } else if (obj.material) {
+        if (obj.material.map) obj.material.map.dispose?.();
+        obj.material.dispose?.();
       }
     }
   });
+
   oudModel = null;
 }
 
@@ -104,12 +113,49 @@ function storeBasePositions(model) {
 
 function resetModelPose() {
   if (!oudModel) return;
+
   oudModel.traverse((obj) => {
     if (obj.isMesh && obj.userData.basePosition) {
       obj.position.copy(obj.userData.basePosition);
       obj.visible = true;
     }
   });
+}
+
+function getNodeHierarchyName(obj) {
+  let names = [];
+  let current = obj;
+
+  while (current) {
+    if (current.name) {
+      names.push(current.name.toLowerCase());
+    }
+    current = current.parent;
+  }
+
+  return names.join(" > ");
+}
+
+function getPartType(obj) {
+  const fullName = getNodeHierarchyName(obj);
+
+  if (fullName.includes("string")) return "strings";
+  if (fullName.includes("cheville")) return "chevilles";
+  if (fullName.includes("table")) return "table";
+
+  // Sécurité :
+  // si ce n'est ni strings ni chevilles, on considère que la grande pièce principale = table
+  return "table";
+}
+
+function debugModelNames(model) {
+  console.log("===== DEBUG MODEL NODES =====");
+  model.traverse((obj) => {
+    if (obj.isMesh) {
+      console.log("Mesh:", obj.name, "| full:", getNodeHierarchyName(obj));
+    }
+  });
+  console.log("=============================");
 }
 
 function explodeModel() {
@@ -120,14 +166,14 @@ function explodeModel() {
   oudModel.traverse((obj) => {
     if (!obj.isMesh || !obj.userData.basePosition) return;
 
-    const name = obj.name.toLowerCase();
+    const partType = getPartType(obj);
     const base = obj.userData.basePosition.clone();
 
-    if (name.includes("table")) {
+    if (partType === "table") {
       obj.position.copy(base.add(new THREE.Vector3(-0.15, 0, 0.10)));
-    } else if (name.includes("cheville")) {
+    } else if (partType === "chevilles") {
       obj.position.copy(base.add(new THREE.Vector3(0.25, 0.15, 0)));
-    } else if (name.includes("string")) {
+    } else if (partType === "strings") {
       obj.position.copy(base.add(new THREE.Vector3(0.10, 0.02, 0.18)));
     }
   });
@@ -138,13 +184,13 @@ function showOnlyPart(partKeyword) {
 
   oudModel.traverse((obj) => {
     if (!obj.isMesh) return;
-    const name = obj.name.toLowerCase();
-    obj.visible = name.includes(partKeyword);
+    obj.visible = getPartType(obj) === partKeyword;
   });
 }
 
 function showAllParts() {
   if (!oudModel) return;
+
   oudModel.traverse((obj) => {
     if (obj.isMesh) obj.visible = true;
   });
@@ -159,37 +205,41 @@ function applyTextureToModel(textureUrl) {
       tex.flipY = false;
       tex.wrapS = THREE.RepeatWrapping;
       tex.wrapT = THREE.RepeatWrapping;
+      tex.colorSpace = THREE.SRGBColorSpace;
+      tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
 
       oudModel.traverse((obj) => {
         if (!obj.isMesh) return;
 
-        const name = obj.name.toLowerCase();
+        const partType = getPartType(obj);
 
-        if (name.includes("string")) {
+        // strings toujours blanches
+        if (partType === "strings") {
           obj.material = new THREE.MeshStandardMaterial({
-            color: 0xe6e6e6,
-            roughness: 0.3,
+            color: 0xffffff,
+            roughness: 0.25,
             metalness: 0.45,
           });
-        } else if (name.includes("cheville")) {
+        }
+        // chevilles toujours noires
+        else if (partType === "chevilles") {
           obj.material = new THREE.MeshStandardMaterial({
-            map: tex,
-            roughness: 0.75,
-            metalness: 0.05,
+            color: 0x111111,
+            roughness: 0.88,
+            metalness: 0.03,
           });
-        } else if (name.includes("table")) {
+        }
+        // table = texture
+        else if (partType === "table") {
           obj.material = new THREE.MeshStandardMaterial({
             map: tex,
+            color: 0xffffff,
             roughness: 0.82,
             metalness: 0.03,
           });
-        } else {
-          obj.material = new THREE.MeshStandardMaterial({
-            color: 0xb58d6b,
-            roughness: 0.8,
-            metalness: 0.05,
-          });
         }
+
+        obj.material.needsUpdate = true;
       });
     },
     undefined,
@@ -207,11 +257,45 @@ function centerAndScaleModel(model) {
   box.getSize(size);
   box.getCenter(center);
 
-  model.position.sub(center);
+  model.position.x -= center.x;
+  model.position.y -= center.y;
+  model.position.z -= center.z;
 
   const maxDim = Math.max(size.x, size.y, size.z);
-  const scale = 2.4 / maxDim;
+  const targetSize = 1.8;
+  const scale = targetSize / maxDim;
   model.scale.setScalar(scale);
+
+  const box2 = new THREE.Box3().setFromObject(model);
+  const center2 = new THREE.Vector3();
+  box2.getCenter(center2);
+
+  model.position.x -= center2.x;
+  model.position.y -= center2.y;
+  model.position.z -= center2.z;
+}
+
+function fitCameraFrontToObject(object) {
+  const box = new THREE.Box3().setFromObject(object);
+  const size = new THREE.Vector3();
+  const center = new THREE.Vector3();
+
+  box.getSize(size);
+  box.getCenter(center);
+
+  const maxDim = Math.max(size.x, size.y, size.z);
+  const fov = camera.fov * (Math.PI / 180);
+  let cameraZ = Math.abs((maxDim / 2) / Math.tan(fov / 2));
+  cameraZ *= 1.7;
+
+  camera.position.set(center.x, center.y + size.y * 0.08, center.z + cameraZ);
+
+  camera.near = 0.01;
+  camera.far = 100;
+  camera.updateProjectionMatrix();
+
+  controls.target.set(center.x, center.y, center.z);
+  controls.update();
 }
 
 function loadModel(modelUrl, textureUrl) {
@@ -223,9 +307,13 @@ function loadModel(modelUrl, textureUrl) {
       oudModel = gltf.scene;
       scene.add(oudModel);
 
+      oudModel.rotation.set(0, 0, 0);
+
       centerAndScaleModel(oudModel);
       storeBasePositions(oudModel);
+      debugModelNames(oudModel);
       applyTextureToModel(textureUrl);
+      fitCameraFrontToObject(oudModel);
     },
     undefined,
     (err) => {
@@ -264,32 +352,32 @@ async function fetchState() {
   }
 }
 
-btnReset.addEventListener("click", () => {
+btnReset?.addEventListener("click", () => {
   resetModelPose();
   showAllParts();
 });
 
-btnExplode.addEventListener("click", () => {
+btnExplode?.addEventListener("click", () => {
   explodeModel();
   showAllParts();
 });
 
-btnTable.addEventListener("click", () => {
+btnTable?.addEventListener("click", () => {
   resetModelPose();
   showOnlyPart("table");
 });
 
-btnChevilles.addEventListener("click", () => {
+btnChevilles?.addEventListener("click", () => {
   resetModelPose();
-  showOnlyPart("cheville");
+  showOnlyPart("chevilles");
 });
 
-btnStrings.addEventListener("click", () => {
+btnStrings?.addEventListener("click", () => {
   resetModelPose();
-  showOnlyPart("string");
+  showOnlyPart("strings");
 });
 
-btnAll.addEventListener("click", () => {
+btnAll?.addEventListener("click", () => {
   resetModelPose();
   showAllParts();
 });

@@ -8,9 +8,8 @@ from app.data.instrument_info import INSTRUMENT_INFO
 from app.analysis.label_utils import normalize_label
 from app.analysis.appearance import (
     crop_from_box,
-    extract_dominant_color,
-    classify_wood_tone,
-    choose_texture_profile,
+    choose_best_texture_from_crop,
+    bgr_to_rgb_list,
 )
 from app.detection.detector import InstrumentDetector
 from app.ar.overlay import draw_detection_overlay
@@ -29,8 +28,13 @@ def start_web_server():
 
 
 def texture_url_from_profile(texture_profile):
-    texture_name = texture_profile["name"]
-    return f"/assets/textures/{texture_name}"
+    return f"/assets/textures/{texture_profile['name']}"
+
+
+def format_ranking(ranking):
+    if not ranking:
+        return "aucun classement"
+    return " | ".join([f"{item['key']}={item['score']}" for item in ranking])
 
 
 def main():
@@ -54,6 +58,8 @@ def main():
 
     print("[INFO] Appuie sur 'q' pour quitter.")
 
+    last_debug_signature = None
+
     while True:
         ret, frame = cap.read()
         if not ret:
@@ -76,13 +82,15 @@ def main():
 
             wood_tone = None
             texture_profile = None
-            dominant_color = None
+            tint_rgb = [181, 141, 107]
+            dominant_bgr = None
 
             if label == "oud":
                 crop = crop_from_box(raw_frame, x1, y1, x2, y2)
-                dominant_color = extract_dominant_color(crop)
-                wood_tone = classify_wood_tone(dominant_color)
-                texture_profile = choose_texture_profile(wood_tone)
+                texture_profile = choose_best_texture_from_crop(crop)
+                wood_tone = texture_profile["tone"]
+                dominant_bgr = texture_profile["dominant_bgr"]
+                tint_rgb = bgr_to_rgb_list(dominant_bgr)
 
             frame = draw_detection_overlay(
                 frame=frame,
@@ -91,7 +99,7 @@ def main():
                 box=(x1, y1, x2, y2),
                 wood_tone=wood_tone,
                 texture_name=texture_profile["name"] if texture_profile else None,
-                dominant_color=dominant_color,
+                dominant_color=dominant_bgr,
             )
 
             area = max(0, (x2 - x1) * (y2 - y1))
@@ -102,11 +110,13 @@ def main():
                     "info_text": info_text,
                     "wood_tone": wood_tone,
                     "texture_profile": texture_profile,
+                    "tint_rgb": tint_rgb,
                 }
 
         if primary_detection is not None:
             if primary_detection["label"] == "oud" and primary_detection["texture_profile"] is not None:
                 profile = primary_detection["texture_profile"]
+
                 update_state(
                     visible=True,
                     instrument="oud",
@@ -115,7 +125,23 @@ def main():
                     texture_name=profile["name"],
                     texture_url=texture_url_from_profile(profile),
                     model_url="/assets/models/oud.glb",
+                    tint_rgb=primary_detection["tint_rgb"],
                 )
+
+                # debug console: afficher seulement quand ça change
+                debug_signature = (
+                    profile["name"],
+                    tuple(primary_detection["tint_rgb"]),
+                    profile["score"],
+                )
+
+                if debug_signature != last_debug_signature:
+                    print("\n[DEBUG OUD]")
+                    print(f"Texture choisie : {profile['name']}")
+                    print(f"Score meilleur match : {profile['score']}")
+                    print(f"Classement : {format_ranking(profile.get('ranking', []))}")
+                    last_debug_signature = debug_signature
+
             else:
                 update_state(
                     visible=False,

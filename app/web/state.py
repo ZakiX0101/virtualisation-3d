@@ -5,10 +5,11 @@ DEFAULT_STATE = {
     "visible": False,
     "instrument": None,
     "history": "",
-    "wood_tone": "classic_brown",
+    "wood_tone": "wood_classic",
     "texture_name": "wood_classic.jpg",
     "texture_url": "/assets/textures/wood_classic.jpg",
     "model_url": "/assets/models/oud.glb",
+    "tint_rgb": [181, 141, 107],
     "parts": [
         {
             "name": "Table",
