@@ -198,50 +198,64 @@ function applyTextureToModel(textureUrl) {
 
   textureLoader.load(
     textureUrl,
-    (tex) => {
-      tex.flipY = false;
-      tex.wrapS = THREE.RepeatWrapping;
-      tex.wrapT = THREE.RepeatWrapping;
-      tex.colorSpace = THREE.SRGBColorSpace;
+    (loadedTex) => {
+      const woodTex = loadedTex.clone();
+      woodTex.needsUpdate = true;
+      woodTex.flipY = false;
+      woodTex.wrapS = THREE.RepeatWrapping;
+      woodTex.wrapT = THREE.RepeatWrapping;
+      woodTex.colorSpace = THREE.SRGBColorSpace;
+      woodTex.anisotropy = renderer.capabilities.getMaxAnisotropy();
 
       instrumentModel.traverse((obj) => {
         if (!obj.isMesh) return;
 
         if (Array.isArray(obj.material)) {
           obj.material.forEach(disposeMaterial);
-        } else {
+        } else if (obj.material) {
           disposeMaterial(obj.material);
         }
 
         const partType = getPartType(obj);
 
+        let material;
+
         if (partType === "string") {
-          obj.material = new THREE.MeshStandardMaterial({
-            color: 0xe6e6e6,
-            roughness: 0.3,
-            metalness: 0.45,
+          material = new THREE.MeshStandardMaterial({
+            color: 0xffffff,
+            roughness: 0.25,
+            metalness: 0.35,
           });
         } else if (partType === "cheville") {
-          obj.material = new THREE.MeshStandardMaterial({
-            map: tex,
-            roughness: 0.75,
+          material = new THREE.MeshStandardMaterial({
+            color: 0x111111,
+            roughness: 0.7,
             metalness: 0.05,
           });
         } else if (partType === "table") {
-          obj.material = new THREE.MeshStandardMaterial({
-            map: tex,
+          material = new THREE.MeshStandardMaterial({
+            map: woodTex,
+            color: 0xffffff,
             roughness: 0.82,
             metalness: 0.03,
           });
         } else {
-          obj.material = new THREE.MeshStandardMaterial({
+          material = new THREE.MeshStandardMaterial({
             color: 0xb58d6b,
             roughness: 0.8,
             metalness: 0.05,
           });
         }
 
+        obj.material = material;
         obj.material.needsUpdate = true;
+
+        if (obj.geometry) {
+          obj.geometry.computeVertexNormals();
+        }
+
+        obj.castShadow = true;
+        obj.receiveShadow = true;
       });
     },
     undefined,
