@@ -17,7 +17,7 @@ const btnStrings = document.getElementById("btnStrings");
 const btnAll = document.getElementById("btnAll");
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x11151b);
+scene.background = new THREE.Color(0xffffff);
 
 const camera = new THREE.PerspectiveCamera(
   45,
@@ -30,37 +30,48 @@ camera.position.set(0, 1.0, 4.5);
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(viewer.clientWidth, viewer.clientHeight);
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.outputColorSpace = THREE.SRGBColorSpace;
 viewer.appendChild(renderer.domElement);
 
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 controls.target.set(0, 0.6, 0);
 
-const hemiLight = new THREE.HemisphereLight(0xffffff, 0x334455, 1.2);
+const hemiLight = new THREE.HemisphereLight(0xffffff, 0xe8edf2, 1.35);
 scene.add(hemiLight);
 
-const dirLight = new THREE.DirectionalLight(0xffffff, 1.3);
+const dirLight = new THREE.DirectionalLight(0xffffff, 1.4);
 dirLight.position.set(4, 5, 3);
 scene.add(dirLight);
 
+const fillLight = new THREE.DirectionalLight(0xffffff, 0.7);
+fillLight.position.set(-3, 3, 4);
+scene.add(fillLight);
+
 const floor = new THREE.Mesh(
   new THREE.CircleGeometry(3.5, 64),
-  new THREE.MeshStandardMaterial({ color: 0x1b222b, roughness: 1.0 })
+  new THREE.MeshStandardMaterial({
+    color: 0xf1f4f8,
+    roughness: 1.0,
+    metalness: 0.0,
+  })
 );
 floor.rotation.x = -Math.PI / 2;
 floor.position.y = -1.0;
 scene.add(floor);
 
-let oudModel = null;
+let instrumentModel = null;
 let currentModelUrl = null;
 let currentTextureUrl = null;
+
+let lastSeenAt = 0;
+const HOLD_MS = 1500;
 
 const textureLoader = new THREE.TextureLoader();
 const gltfLoader = new GLTFLoader();
 
 function updateParts(parts = []) {
   partsListEl.innerHTML = "";
-
   for (const part of parts) {
     const wrapper = document.createElement("div");
     wrapper.className = "part";
@@ -79,28 +90,28 @@ function updateParts(parts = []) {
   }
 }
 
+function disposeMaterial(material) {
+  if (!material) return;
+  if (material.map) material.map.dispose?.();
+  material.dispose?.();
+}
+
 function removeCurrentModel() {
-  if (!oudModel) return;
+  if (!instrumentModel) return;
 
-  scene.remove(oudModel);
-
-  oudModel.traverse((obj) => {
+  scene.remove(instrumentModel);
+  instrumentModel.traverse((obj) => {
     if (obj.isMesh) {
       obj.geometry?.dispose?.();
-
       if (Array.isArray(obj.material)) {
-        obj.material.forEach((m) => {
-          if (m.map) m.map.dispose?.();
-          m.dispose?.();
-        });
-      } else if (obj.material) {
-        if (obj.material.map) obj.material.map.dispose?.();
-        obj.material.dispose?.();
+        obj.material.forEach(disposeMaterial);
+      } else {
+        disposeMaterial(obj.material);
       }
     }
   });
 
-  oudModel = null;
+  instrumentModel = null;
 }
 
 function storeBasePositions(model) {
@@ -112,9 +123,9 @@ function storeBasePositions(model) {
 }
 
 function resetModelPose() {
-  if (!oudModel) return;
+  if (!instrumentModel) return;
 
-  oudModel.traverse((obj) => {
+  instrumentModel.traverse((obj) => {
     if (obj.isMesh && obj.userData.basePosition) {
       obj.position.copy(obj.userData.basePosition);
       obj.visible = true;
@@ -123,13 +134,11 @@ function resetModelPose() {
 }
 
 function getNodeHierarchyName(obj) {
-  let names = [];
+  const names = [];
   let current = obj;
 
   while (current) {
-    if (current.name) {
-      names.push(current.name.toLowerCase());
-    }
+    if (current.name) names.push(current.name.toLowerCase());
     current = current.parent;
   }
 
@@ -139,31 +148,19 @@ function getNodeHierarchyName(obj) {
 function getPartType(obj) {
   const fullName = getNodeHierarchyName(obj);
 
-  if (fullName.includes("string")) return "strings";
-  if (fullName.includes("cheville")) return "chevilles";
+  if (fullName.includes("string")) return "string";
+  if (fullName.includes("cheville")) return "cheville";
   if (fullName.includes("table")) return "table";
 
-  // Sécurité :
-  // si ce n'est ni strings ni chevilles, on considère que la grande pièce principale = table
   return "table";
 }
 
-function debugModelNames(model) {
-  console.log("===== DEBUG MODEL NODES =====");
-  model.traverse((obj) => {
-    if (obj.isMesh) {
-      console.log("Mesh:", obj.name, "| full:", getNodeHierarchyName(obj));
-    }
-  });
-  console.log("=============================");
-}
-
 function explodeModel() {
-  if (!oudModel) return;
+  if (!instrumentModel) return;
 
   resetModelPose();
 
-  oudModel.traverse((obj) => {
+  instrumentModel.traverse((obj) => {
     if (!obj.isMesh || !obj.userData.basePosition) return;
 
     const partType = getPartType(obj);
@@ -171,33 +168,33 @@ function explodeModel() {
 
     if (partType === "table") {
       obj.position.copy(base.add(new THREE.Vector3(-0.15, 0, 0.10)));
-    } else if (partType === "chevilles") {
+    } else if (partType === "cheville") {
       obj.position.copy(base.add(new THREE.Vector3(0.25, 0.15, 0)));
-    } else if (partType === "strings") {
+    } else if (partType === "string") {
       obj.position.copy(base.add(new THREE.Vector3(0.10, 0.02, 0.18)));
     }
   });
 }
 
 function showOnlyPart(partKeyword) {
-  if (!oudModel) return;
+  if (!instrumentModel) return;
 
-  oudModel.traverse((obj) => {
+  instrumentModel.traverse((obj) => {
     if (!obj.isMesh) return;
     obj.visible = getPartType(obj) === partKeyword;
   });
 }
 
 function showAllParts() {
-  if (!oudModel) return;
+  if (!instrumentModel) return;
 
-  oudModel.traverse((obj) => {
+  instrumentModel.traverse((obj) => {
     if (obj.isMesh) obj.visible = true;
   });
 }
 
 function applyTextureToModel(textureUrl) {
-  if (!oudModel || !textureUrl) return;
+  if (!instrumentModel || !textureUrl) return;
 
   textureLoader.load(
     textureUrl,
@@ -206,36 +203,41 @@ function applyTextureToModel(textureUrl) {
       tex.wrapS = THREE.RepeatWrapping;
       tex.wrapT = THREE.RepeatWrapping;
       tex.colorSpace = THREE.SRGBColorSpace;
-      tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
 
-      oudModel.traverse((obj) => {
+      instrumentModel.traverse((obj) => {
         if (!obj.isMesh) return;
+
+        if (Array.isArray(obj.material)) {
+          obj.material.forEach(disposeMaterial);
+        } else {
+          disposeMaterial(obj.material);
+        }
 
         const partType = getPartType(obj);
 
-        // strings toujours blanches
-        if (partType === "strings") {
+        if (partType === "string") {
           obj.material = new THREE.MeshStandardMaterial({
-            color: 0xffffff,
-            roughness: 0.25,
+            color: 0xe6e6e6,
+            roughness: 0.3,
             metalness: 0.45,
           });
-        }
-        // chevilles toujours noires
-        else if (partType === "chevilles") {
-          obj.material = new THREE.MeshStandardMaterial({
-            color: 0x111111,
-            roughness: 0.88,
-            metalness: 0.03,
-          });
-        }
-        // table = texture
-        else if (partType === "table") {
+        } else if (partType === "cheville") {
           obj.material = new THREE.MeshStandardMaterial({
             map: tex,
-            color: 0xffffff,
+            roughness: 0.75,
+            metalness: 0.05,
+          });
+        } else if (partType === "table") {
+          obj.material = new THREE.MeshStandardMaterial({
+            map: tex,
             roughness: 0.82,
             metalness: 0.03,
+          });
+        } else {
+          obj.material = new THREE.MeshStandardMaterial({
+            color: 0xb58d6b,
+            roughness: 0.8,
+            metalness: 0.05,
           });
         }
 
@@ -257,45 +259,11 @@ function centerAndScaleModel(model) {
   box.getSize(size);
   box.getCenter(center);
 
-  model.position.x -= center.x;
-  model.position.y -= center.y;
-  model.position.z -= center.z;
+  model.position.sub(center);
 
   const maxDim = Math.max(size.x, size.y, size.z);
-  const targetSize = 1.8;
-  const scale = targetSize / maxDim;
+  const scale = 2.4 / maxDim;
   model.scale.setScalar(scale);
-
-  const box2 = new THREE.Box3().setFromObject(model);
-  const center2 = new THREE.Vector3();
-  box2.getCenter(center2);
-
-  model.position.x -= center2.x;
-  model.position.y -= center2.y;
-  model.position.z -= center2.z;
-}
-
-function fitCameraFrontToObject(object) {
-  const box = new THREE.Box3().setFromObject(object);
-  const size = new THREE.Vector3();
-  const center = new THREE.Vector3();
-
-  box.getSize(size);
-  box.getCenter(center);
-
-  const maxDim = Math.max(size.x, size.y, size.z);
-  const fov = camera.fov * (Math.PI / 180);
-  let cameraZ = Math.abs((maxDim / 2) / Math.tan(fov / 2));
-  cameraZ *= 1.7;
-
-  camera.position.set(center.x, center.y + size.y * 0.08, center.z + cameraZ);
-
-  camera.near = 0.01;
-  camera.far = 100;
-  camera.updateProjectionMatrix();
-
-  controls.target.set(center.x, center.y, center.z);
-  controls.update();
 }
 
 function loadModel(modelUrl, textureUrl) {
@@ -304,16 +272,14 @@ function loadModel(modelUrl, textureUrl) {
   gltfLoader.load(
     modelUrl,
     (gltf) => {
-      oudModel = gltf.scene;
-      scene.add(oudModel);
+      instrumentModel = gltf.scene;
+      scene.add(instrumentModel);
+      centerAndScaleModel(instrumentModel);
+      storeBasePositions(instrumentModel);
 
-      oudModel.rotation.set(0, 0, 0);
-
-      centerAndScaleModel(oudModel);
-      storeBasePositions(oudModel);
-      debugModelNames(oudModel);
-      applyTextureToModel(textureUrl);
-      fitCameraFrontToObject(oudModel);
+      if (textureUrl) {
+        applyTextureToModel(textureUrl);
+      }
     },
     undefined,
     (err) => {
@@ -324,7 +290,7 @@ function loadModel(modelUrl, textureUrl) {
 
 async function fetchState() {
   try {
-    const res = await fetch("/api/state");
+    const res = await fetch("/api/state", { cache: "no-store" });
     const state = await res.json();
 
     instrumentEl.textContent = state.instrument || "Aucun";
@@ -333,16 +299,22 @@ async function fetchState() {
     historyTextEl.textContent = state.history || "En attente de détection...";
     updateParts(state.parts || []);
 
-    if (state.visible && state.instrument === "oud") {
+    const shouldShowModel = state.visible && !!state.model_url;
+
+    if (shouldShowModel) {
+      lastSeenAt = Date.now();
+
       if (currentModelUrl !== state.model_url) {
         currentModelUrl = state.model_url;
-        currentTextureUrl = state.texture_url;
-        loadModel(state.model_url, state.texture_url);
-      } else if (currentTextureUrl !== state.texture_url) {
-        currentTextureUrl = state.texture_url;
-        applyTextureToModel(state.texture_url);
+        currentTextureUrl = state.texture_url || null;
+        loadModel(state.model_url, state.texture_url || null);
+      } else if ((state.texture_url || null) !== currentTextureUrl) {
+        currentTextureUrl = state.texture_url || null;
+        if (currentTextureUrl) {
+          applyTextureToModel(currentTextureUrl);
+        }
       }
-    } else {
+    } else if (Date.now() - lastSeenAt > HOLD_MS) {
       removeCurrentModel();
       currentModelUrl = null;
       currentTextureUrl = null;
@@ -369,12 +341,12 @@ btnTable?.addEventListener("click", () => {
 
 btnChevilles?.addEventListener("click", () => {
   resetModelPose();
-  showOnlyPart("chevilles");
+  showOnlyPart("cheville");
 });
 
 btnStrings?.addEventListener("click", () => {
   resetModelPose();
-  showOnlyPart("strings");
+  showOnlyPart("string");
 });
 
 btnAll?.addEventListener("click", () => {

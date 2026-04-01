@@ -14,27 +14,29 @@ from app.analysis.appearance import (
 from app.detection.detector import InstrumentDetector
 from app.ar.overlay import draw_detection_overlay
 from app.web.server import run_server
-from app.web.state import update_state, reset_state
+from app.web.state import update_state
+
+
+MODEL_BY_INSTRUMENT = {
+    "oud": "/assets/models/oud.glb",
+    # add others later:
+    # "loutar": "/assets/models/loutar.glb",
+}
 
 
 def start_web_server():
     thread = threading.Thread(
         target=run_server,
         kwargs={"host": "127.0.0.1", "port": 8000},
-        daemon=True
+        daemon=True,
     )
     thread.start()
     time.sleep(1.2)
 
 
 def texture_url_from_profile(texture_profile):
-    return f"/assets/textures/{texture_profile['name']}"
-
-
-def format_ranking(ranking):
-    if not ranking:
-        return "aucun classement"
-    return " | ".join([f"{item['key']}={item['score']}" for item in ranking])
+    texture_name = texture_profile["name"]
+    return f"/assets/textures/{texture_name}"
 
 
 def main():
@@ -45,20 +47,25 @@ def main():
         return
 
     print(f"[INFO] Modèle utilisé : {model_path}")
-
     start_web_server()
     webbrowser.open("http://127.0.0.1:8000")
 
     detector = InstrumentDetector(str(model_path), conf=CONFIDENCE)
-
     cap = cv2.VideoCapture(CAMERA_INDEX)
+
     if not cap.isOpened():
         print("Erreur : impossible d’ouvrir la caméra.")
         return
 
     print("[INFO] Appuie sur 'q' pour quitter.")
 
-    last_debug_signature = None
+    last_3d_instrument = None
+    last_3d_model_url = None
+    last_3d_texture_url = None
+    last_3d_texture_name = None
+    last_3d_wood_tone = None
+    last_3d_tint_rgb = [181, 141, 107]
+    last_history = "En attente de détection..."
 
     while True:
         ret, frame = cap.read()
@@ -82,15 +89,15 @@ def main():
 
             wood_tone = None
             texture_profile = None
+            dominant_color = None
             tint_rgb = [181, 141, 107]
-            dominant_bgr = None
 
             if label == "oud":
                 crop = crop_from_box(raw_frame, x1, y1, x2, y2)
                 texture_profile = choose_best_texture_from_crop(crop)
                 wood_tone = texture_profile["tone"]
-                dominant_bgr = texture_profile["dominant_bgr"]
-                tint_rgb = bgr_to_rgb_list(dominant_bgr)
+                dominant_color = texture_profile["dominant_bgr"]
+                tint_rgb = bgr_to_rgb_list(dominant_color)
 
             frame = draw_detection_overlay(
                 frame=frame,
@@ -99,7 +106,7 @@ def main():
                 box=(x1, y1, x2, y2),
                 wood_tone=wood_tone,
                 texture_name=texture_profile["name"] if texture_profile else None,
-                dominant_color=dominant_bgr,
+                dominant_color=dominant_color,
             )
 
             area = max(0, (x2 - x1) * (y2 - y1))
@@ -114,45 +121,56 @@ def main():
                 }
 
         if primary_detection is not None:
-            if primary_detection["label"] == "oud" and primary_detection["texture_profile"] is not None:
-                profile = primary_detection["texture_profile"]
+            label = primary_detection["label"]
+            info_text = primary_detection["info_text"]
+            last_history = info_text
 
-                update_state(
-                    visible=True,
-                    instrument="oud",
-                    history=primary_detection["info_text"],
-                    wood_tone=primary_detection["wood_tone"],
-                    texture_name=profile["name"],
-                    texture_url=texture_url_from_profile(profile),
-                    model_url="/assets/models/oud.glb",
-                    tint_rgb=primary_detection["tint_rgb"],
-                )
+            model_url = MODEL_BY_INSTRUMENT.get(label)
 
-                # debug console: afficher seulement quand ça change
-                debug_signature = (
-                    profile["name"],
-                    tuple(primary_detection["tint_rgb"]),
-                    profile["score"],
-                )
+            # Changer l'objet 3D seulement si cet instrument a un modèle 3D
+            if model_url:
+                last_3d_instrument = label
+                last_3d_model_url = model_url
 
-                if debug_signature != last_debug_signature:
-                    print("\n[DEBUG OUD]")
-                    print(f"Texture choisie : {profile['name']}")
-                    print(f"Score meilleur match : {profile['score']}")
-                    print(f"Classement : {format_ranking(profile.get('ranking', []))}")
-                    last_debug_signature = debug_signature
+                if label == "oud" and primary_detection["texture_profile"] is not None:
+                    profile = primary_detection["texture_profile"]
+                    last_3d_texture_name = profile["name"]
+                    last_3d_texture_url = texture_url_from_profile(profile)
+                    last_3d_wood_tone = primary_detection["wood_tone"]
+                    last_3d_tint_rgb = primary_detection["tint_rgb"]
+                else:
+                    last_3d_texture_name = None
+                    last_3d_texture_url = None
+                    last_3d_wood_tone = None
+                    last_3d_tint_rgb = [181, 141, 107]
 
-            else:
-                update_state(
-                    visible=False,
-                    instrument=primary_detection["label"],
-                    history=primary_detection["info_text"],
-                )
+            # Garder le dernier modèle 3D affiché même si la détection courante
+            # n'a pas encore de modèle 3D
+            update_state(
+                visible=last_3d_model_url is not None,
+                instrument=label,  # texte UI = instrument détecté actuellement
+                history=last_history,
+                wood_tone=last_3d_wood_tone,
+                texture_name=last_3d_texture_name,
+                texture_url=last_3d_texture_url,
+                model_url=last_3d_model_url,
+                tint_rgb=last_3d_tint_rgb,
+            )
+
         else:
-            reset_state()
+            # Aucune détection : garder le dernier modèle 3D visible
+            update_state(
+                visible=last_3d_model_url is not None,
+                instrument=last_3d_instrument,
+                history=last_history,
+                wood_tone=last_3d_wood_tone,
+                texture_name=last_3d_texture_name,
+                texture_url=last_3d_texture_url,
+                model_url=last_3d_model_url,
+                tint_rgb=last_3d_tint_rgb,
+            )
 
         cv2.imshow(WINDOW_TITLE, frame)
-
         key = cv2.waitKey(1) & 0xFF
         if key == ord("q"):
             break
